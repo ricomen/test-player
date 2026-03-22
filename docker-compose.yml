@@ -1,0 +1,11 @@
+services:
+  test-player:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./media:/videos:ro
+    environment:
+      VIDEO_ROOT: /videos
+      PORT: 8080
+    restart: unless-stopped
