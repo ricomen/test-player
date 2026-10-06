@@ -29,10 +29,29 @@
             Наведите указку на ролик и нажмите ×. Файл удаляется с диска.
           </p>
         </div>
+        <div
+          class="video-spotlight"
+          id="videoSpotlight"
+          hidden
+          aria-label="Крупный просмотр"
+        >
+          <div class="video-spotlight__bar">
+            <p class="video-spotlight__title" id="spotlightTitle"></p>
+            <button
+              type="button"
+              class="video-spotlight__close btn"
+              id="spotlightClose"
+              aria-label="Свернуть"
+            >
+              Свернуть
+            </button>
+          </div>
+          <div class="video-spotlight__media" id="spotlightMedia"></div>
+        </div>
         <ul class="video-grid" id="videoGrid"></ul>
       </section>
 
-      <section class="thumb-section" aria-label="Превью кадра">
+      <!-- <section class="thumb-section" aria-label="Превью кадра">
         <h2 class="thumb-section__title">Превью кадра</h2>
         <p class="thumb-section__hint">
           Первый кадр через серверный <code>ffmpeg</code>, результат
@@ -54,12 +73,18 @@
           <p class="thumb-section__preview-title">Результат</p>
           <img id="thumbPreviewImg" alt="Кадр из выбранного видео" />
         </div>
-      </section>
+      </section> -->
     </main>
 
     <template id="video-cell-tpl">
       <li class="video-cell">
         <div class="video-cell__media">
+          <img
+            class="video-cell__poster"
+            alt=""
+            hidden
+            decoding="async"
+          />
           <video
             class="video-js vjs-default-skin video-cell__player"
             playsinline

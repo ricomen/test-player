@@ -51,6 +51,47 @@ import { deleteVideo, getVideos } from './videos-api.js';
     return a;
   }
 
+  function captureVideoFrameUrl(videoEl) {
+    return new Promise((resolve) => {
+      if (!videoEl || videoEl.readyState < 2) {
+        resolve(null);
+        return;
+      }
+      const w = videoEl.videoWidth;
+      const h = videoEl.videoHeight;
+      if (!w || !h) {
+        resolve(null);
+        return;
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(null);
+        return;
+      }
+      try {
+        ctx.drawImage(videoEl, 0, 0, w, h);
+      } catch (err) {
+        console.warn('test-player: не удалось снять кадр', err);
+        resolve(null);
+        return;
+      }
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            resolve(null);
+            return;
+          }
+          resolve(URL.createObjectURL(blob));
+        },
+        'image/jpeg',
+        0.82
+      );
+    });
+  }
+
   function sourceForVideoJs(item, p) {
     const src = streamUrl(p);
     const mime = item && typeof item.mime === 'string' ? item.mime : '';
@@ -70,12 +111,17 @@ import { deleteVideo, getVideos } from './videos-api.js';
     const shuffleBtn = document.getElementById('shuffleBtn');
     const deleteModeBtn = document.getElementById('deleteModeBtn');
     const deleteModeHint = document.getElementById('deleteModeHint');
+    const spotlightEl = document.getElementById('videoSpotlight');
+    const spotlightTitle = document.getElementById('spotlightTitle');
+    const spotlightClose = document.getElementById('spotlightClose');
     if (!gridEl || !cellTpl) return;
 
-    /** @type {{ cell: Element, item: object, path: string, mode: 'native'|'vjs', video: HTMLVideoElement, player: object|null, active: boolean, portrait: boolean|null }[]} */
+    /** @type {{ cell: Element, item: object, path: string, mode: 'native'|'vjs', video: HTMLVideoElement, player: object|null, active: boolean, portrait: boolean|null, posterUrl: string|null, _deactivating: boolean, _inView: boolean }[]} */
     let cells = [];
     let observer = null;
     let deleteMode = false;
+    /** @type {typeof cells[0] | null} */
+    let spotlightEntry = null;
 
     function setDeleteMode(on) {
       deleteMode = Boolean(on);
@@ -154,8 +200,210 @@ import { deleteVideo, getVideos } from './videos-api.js';
       }
     }
 
+    function posterEl(entry) {
+      return entry.cell.querySelector('.video-cell__poster');
+    }
+
+    function readResumeTime(entry) {
+      const raw = entry.cell.dataset.resumeTime;
+      if (raw == null || raw === '') return 0;
+      const t = parseFloat(raw);
+      return Number.isFinite(t) && t > 0.05 ? t : 0;
+    }
+
+    function saveResumeTime(entry, videoEl) {
+      if (!videoEl) return;
+      const t = videoEl.currentTime;
+      if (Number.isFinite(t) && t > 0.05) {
+        entry.cell.dataset.resumeTime = String(t);
+      }
+    }
+
+    function playFromResumeTime(entry, videoEl) {
+      if (!videoEl) return;
+      const t = readResumeTime(entry);
+      if (t <= 0) {
+        videoEl.play().catch(() => {});
+        return;
+      }
+
+      const seekAndPlay = () => {
+        let target = t;
+        const d = videoEl.duration;
+        if (Number.isFinite(d) && d > 0) {
+          target = Math.min(t, Math.max(0, d - 0.05));
+        }
+        try {
+          videoEl.currentTime = target;
+        } catch (_) {
+          videoEl.play().catch(() => {});
+          return;
+        }
+        videoEl.addEventListener(
+          'seeked',
+          () => {
+            videoEl.play().catch(() => {});
+          },
+          { once: true }
+        );
+      };
+
+      if (videoEl.readyState >= 1) {
+        seekAndPlay();
+      } else {
+        videoEl.addEventListener('loadedmetadata', seekAndPlay, { once: true });
+      }
+    }
+
+    function revokePosterUrl(entry) {
+      if (entry.posterUrl) {
+        URL.revokeObjectURL(entry.posterUrl);
+        entry.posterUrl = null;
+      }
+    }
+
+    function syncPosterDisplay(entry) {
+      const img = posterEl(entry);
+      if (!img) return;
+      if (entry.posterUrl) {
+        img.src = entry.posterUrl;
+        img.hidden = false;
+      } else {
+        img.removeAttribute('src');
+        img.hidden = true;
+      }
+    }
+
+    function bindRevealOnPlay(entry, videoEl) {
+      if (!videoEl) return;
+      if (!entry.posterUrl) {
+        entry.cell.classList.remove('video-cell--loading-video');
+        return;
+      }
+      entry.cell.classList.add('video-cell--loading-video');
+      syncPosterDisplay(entry);
+
+      const reveal = () => {
+        entry.cell.classList.remove('video-cell--loading-video');
+        const img = posterEl(entry);
+        if (img) img.hidden = true;
+      };
+
+      if (!videoEl.paused && videoEl.readyState >= 3) {
+        reveal();
+        return;
+      }
+
+      videoEl.addEventListener('playing', reveal, { once: true });
+      videoEl.addEventListener(
+        'error',
+        () => {
+          entry.cell.classList.remove('video-cell--loading-video');
+        },
+        { once: true }
+      );
+    }
+
+    function setSpotlightOpen(open) {
+      if (!spotlightEl) return;
+      if (open) {
+        spotlightEl.hidden = false;
+        spotlightEl.classList.add('is-open');
+      } else {
+        spotlightEl.classList.remove('is-open');
+        spotlightEl.hidden = true;
+      }
+    }
+
+    function setEntryMutedForGrid(entry, gridMuted) {
+      const v = entry.video;
+      if (v) v.muted = gridMuted;
+      if (entry.player && !entry.player.isDisposed()) {
+        entry.player.muted(gridMuted);
+      }
+    }
+
+    function setSpotlightVisual(entry, on) {
+      const media = entry.cell.querySelector('.video-cell__media');
+      if (!media) return false;
+      media.classList.toggle('is-spotlight', on);
+      entry.cell.classList.toggle('is-spotlight-active', on);
+      document.body.classList.toggle('spotlight-open', on);
+      return true;
+    }
+
+    async function ensureEntryActiveOnly(entry) {
+      if (entry.active) return;
+      activateCell(entry);
+      if (entry.player && !entry.player.isDisposed()) {
+        await new Promise((resolve) => {
+          entry.player.ready(resolve);
+        });
+      }
+    }
+
+    function closeSpotlight() {
+      const entry = spotlightEntry;
+      if (!entry) {
+        setSpotlightOpen(false);
+        document.body.classList.remove('spotlight-open');
+        return;
+      }
+
+      if (entry.video) saveResumeTime(entry, entry.video);
+      setSpotlightVisual(entry, false);
+      setEntryMutedForGrid(entry, true);
+      spotlightEntry = null;
+      setSpotlightOpen(false);
+
+      if (!entry._inView) {
+        void deactivateCell(entry);
+      }
+    }
+
+    async function openSpotlight(entry) {
+      if (deleteMode || !spotlightEl) return;
+
+      if (spotlightEntry === entry) {
+        closeSpotlight();
+        return;
+      }
+
+      if (spotlightEntry) {
+        const prev = spotlightEntry;
+        if (prev.video) saveResumeTime(prev, prev.video);
+        setSpotlightVisual(prev, false);
+        setEntryMutedForGrid(prev, true);
+        spotlightEntry = null;
+      }
+
+      await ensureEntryActiveOnly(entry);
+      if (!setSpotlightVisual(entry, true)) return;
+
+      spotlightEntry = entry;
+      if (spotlightTitle) {
+        spotlightTitle.textContent = entry.path;
+      }
+      setEntryMutedForGrid(entry, false);
+      setSpotlightOpen(true);
+    }
+
+    if (spotlightClose) {
+      spotlightClose.addEventListener('click', () => closeSpotlight());
+    }
+
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape' && spotlightEntry) {
+        closeSpotlight();
+      }
+    });
+
     function disposeAll() {
-      cells.forEach(disposeCell);
+      closeSpotlight();
+      cells.forEach((entry) => {
+        disposeCell(entry);
+        revokePosterUrl(entry);
+      });
       if (observer) {
         observer.disconnect();
         observer = null;
@@ -174,7 +422,8 @@ import { deleteVideo, getVideos } from './videos-api.js';
       v.controls = true;
       v.preload = 'metadata';
       bindOrientation(entry, v);
-      v.play().catch(() => {});
+      bindRevealOnPlay(entry, v);
+      playFromResumeTime(entry, v);
       entry.active = true;
     }
 
@@ -182,6 +431,10 @@ import { deleteVideo, getVideos } from './videos-api.js';
       if (typeof window.videojs !== 'function') {
         console.error('test-player: video.js не загружен');
         return;
+      }
+      if (entry.posterUrl) {
+        entry.cell.classList.add('video-cell--loading-video');
+        syncPosterDisplay(entry);
       }
       const v = entry.video;
       v.className = 'video-js vjs-default-skin video-cell__player';
@@ -203,11 +456,16 @@ import { deleteVideo, getVideos } from './videos-api.js';
         const tech = vjsPlayer.el()?.querySelector('video') || entry.video;
         entry.video = tech;
         bindOrientation(entry, tech);
+        bindRevealOnPlay(entry, tech);
+        playFromResumeTime(entry, tech);
       });
       entry.active = true;
     }
 
     function activateCell(entry) {
+      if (spotlightEntry === entry) {
+        return;
+      }
       if (entry.active) {
         if (entry.player && !entry.player.isDisposed()) {
           entry.player.play().catch(() => {});
@@ -223,13 +481,33 @@ import { deleteVideo, getVideos } from './videos-api.js';
       }
     }
 
-    function deactivateCell(entry) {
-      if (!entry.active) return;
-      // Полный dispose освобождает декодеры при скролле.
-      disposeCell(entry);
-      // Восстановить пустой <video> в ячейке после dispose Video.js
-      // (dispose удаляет/заменяет tech-элемент).
-      ensureVideoEl(entry);
+    async function deactivateCell(entry) {
+      if (spotlightEntry === entry) return;
+      if (!entry.active || entry._deactivating) return;
+      entry._deactivating = true;
+      const videoEl = entry.video;
+      try {
+        if (videoEl) saveResumeTime(entry, videoEl);
+        const frameUrl = videoEl ? await captureVideoFrameUrl(videoEl) : null;
+        if (entry._inView) {
+          if (frameUrl) {
+            revokePosterUrl(entry);
+            entry.posterUrl = frameUrl;
+          }
+          return;
+        }
+        if (!entry.active) return;
+        if (frameUrl) {
+          revokePosterUrl(entry);
+          entry.posterUrl = frameUrl;
+        }
+        disposeCell(entry);
+        ensureVideoEl(entry);
+        syncPosterDisplay(entry);
+        entry.cell.classList.remove('video-cell--loading-video');
+      } finally {
+        entry._deactivating = false;
+      }
     }
 
     function mediaRoot(entry) {
@@ -239,13 +517,17 @@ import { deleteVideo, getVideos } from './videos-api.js';
     function ensureVideoEl(entry) {
       const media = mediaRoot(entry);
       if (!media) return;
-      // videojs.dispose() перестраивает DOM — проще собрать чистый <video>.
-      media.innerHTML = '';
+      const poster = posterEl(entry);
+      const oldV = media.querySelector('.video-cell__player');
+      if (oldV) oldV.remove();
       const v = document.createElement('video');
       v.className = 'video-js vjs-default-skin video-cell__player';
       v.setAttribute('playsinline', '');
       v.preload = 'none';
       media.appendChild(v);
+      if (poster && poster.parentNode !== media) {
+        media.insertBefore(poster, v);
+      }
       entry.video = v;
       entry.player = null;
       entry.active = false;
@@ -262,10 +544,14 @@ import { deleteVideo, getVideos } from './videos-api.js';
     }
 
     function removeCellEntry(entry) {
+      if (spotlightEntry === entry) {
+        closeSpotlight();
+      }
       if (observer) {
         observer.unobserve(entry.cell);
       }
       disposeCell(entry);
+      revokePosterUrl(entry);
       entry.cell.remove();
       cells = cells.filter((c) => c !== entry);
       if (cells.length === 0) {
@@ -309,9 +595,11 @@ import { deleteVideo, getVideos } from './videos-api.js';
             const entry = cells.find((c) => c.cell === io.target);
             if (!entry) continue;
             if (io.isIntersecting) {
+              entry._inView = true;
               activateCell(entry);
             } else {
-              deactivateCell(entry);
+              entry._inView = false;
+              void deactivateCell(entry);
             }
           }
         },
@@ -352,6 +640,9 @@ import { deleteVideo, getVideos } from './videos-api.js';
           player: null,
           active: false,
           portrait: null,
+          posterUrl: null,
+          _deactivating: false,
+          _inView: false,
         };
         cells.push(entry);
         if (deleteBtn) {
@@ -360,6 +651,21 @@ import { deleteVideo, getVideos } from './videos-api.js';
             ev.stopPropagation();
             onDeleteClick(entry, deleteBtn);
           });
+        }
+        const media = cell.querySelector('.video-cell__media');
+        if (media) {
+          media.addEventListener(
+            'click',
+            (ev) => {
+              if (deleteMode) return;
+              if (ev.target.closest('.video-cell__delete')) return;
+              if (ev.target.closest('.vjs-control-bar')) return;
+              ev.preventDefault();
+              ev.stopPropagation();
+              void openSpotlight(entry);
+            },
+            true
+          );
         }
         gridEl.appendChild(fragment);
         observer.observe(cell);
