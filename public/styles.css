@@ -74,6 +74,8 @@ body {
   padding: 0;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  grid-auto-rows: 220px;
+  grid-auto-flow: dense;
 }
 
 .video-grid__empty {
@@ -85,11 +87,139 @@ body {
 
 .video-cell {
   margin: 0;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: #000;
+}
+
+.video-cell--portrait {
+  grid-row: span 2;
+}
+
+.video-cell .video-js {
+  width: 100%;
+  height: 100%;
+  background: #000;
+}
+
+.video-cell .video-js.vjs-fluid,
+.video-cell .video-js.vjs-fill {
+  padding-top: 0;
+}
+
+.video-cell .video-js .vjs-tech {
+  object-fit: contain;
+  width: 100%;
+  height: 100%;
+}
+
+.video-cell__player--native {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.thumb-section {
+  grid-column: 1 / -1;
+  margin-top: 2rem;
+  padding: 1rem 1rem 1.25rem;
+  border: 1px solid rgba(138, 180, 248, 0.25);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.thumb-section__title {
+  margin: 0 0 0.5rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.thumb-section__hint {
+  margin: 0 0 0.75rem;
+  font-size: 0.875rem;
+  color: var(--muted);
+  max-width: 52ch;
+}
+
+.thumb-section__status {
+  margin: 0 0 0.75rem;
+  font-size: 0.875rem;
+  min-height: 1.25rem;
+}
+
+.thumb-section__status--error {
+  color: #f28b82;
+}
+
+.thumb-section__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+}
+
+.thumb-section__label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.thumb-section__label select {
+  min-width: 12rem;
+  max-width: min(100%, 28rem);
+  padding: 0.4rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid rgba(232, 234, 237, 0.2);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.btn {
+  padding: 0.45rem 0.85rem;
+  border-radius: 6px;
+  border: 1px solid var(--accent-dim);
+  background: rgba(138, 180, 248, 0.15);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.btn:hover:not(:disabled) {
+  background: rgba(138, 180, 248, 0.28);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.thumb-section__preview {
+  margin-top: 1rem;
+}
+
+.thumb-section__preview-title {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.thumb-section__preview img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  border: 1px solid rgba(232, 234, 237, 0.15);
 }
 
 .video-cell__player {
   width: 100%;
-  max-height: 220px;
+  height: 100%;
   background: #000;
   vertical-align: middle;
 }

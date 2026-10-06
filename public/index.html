@@ -4,50 +4,55 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Видео</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/video.js@8.21.0/dist/video-js.min.css"
+    />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <!-- <header class="header">
-      <h1>Видео</h1>
-      <p class="subtitle" id="status">Загрузка…</p>
-    </header> -->
-
     <main class="layout">
-      <!-- <section class="player-section" aria-label="Плеер">
-        <video
-          id="player"
-          class="player"
-          controls
-          playsinline
-          preload="metadata"
-        >
-          Ваш браузер не поддерживает воспроизведение видео.
-        </video>
-        <p class="now-playing" id="nowPlaying"></p>
-      </section> -->
-
-      <!-- <section class="list-section" aria-label="Список файлов">
-        <h2 class="list-title">Файлы</h2>
-        <ul class="video-list" id="list"></ul>
-      </section> -->
-
       <section class="grid-section" aria-label="Сетка видео">
-        <!-- <h2 class="grid-section__title">Сетка</h2> -->
         <ul class="video-grid" id="videoGrid"></ul>
+      </section>
+
+      <section class="thumb-section" aria-label="Превью кадра">
+        <h2 class="thumb-section__title">Превью кадра</h2>
+        <p class="thumb-section__hint">
+          Первый кадр через серверный <code>ffmpeg</code>, результат
+          кэшируется.
+        </p>
+        <p class="thumb-section__status" id="thumbStatus" aria-live="polite">
+          Готово к запросу.
+        </p>
+        <div class="thumb-section__row">
+          <label class="thumb-section__label">
+            Файл
+            <select id="thumbVideoSelect" disabled></select>
+          </label>
+          <button type="button" class="btn" id="thumbBtn" disabled>
+            Первый кадр (JPEG)
+          </button>
+        </div>
+        <div class="thumb-section__preview" id="thumbPreviewWrap" hidden>
+          <p class="thumb-section__preview-title">Результат</p>
+          <img id="thumbPreviewImg" alt="Кадр из выбранного видео" />
+        </div>
       </section>
     </main>
 
     <template id="video-cell-tpl">
       <li class="video-cell">
         <video
-          class="video-cell__player"
-          controls
+          class="video-js vjs-default-skin video-cell__player"
           playsinline
-          preload="metadata"
+          preload="none"
         ></video>
       </li>
     </template>
 
-    <script src="/app.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/video.js@8.21.0/dist/video.min.js"></script>
+    <script type="module" src="/app.js"></script>
+    <script type="module" src="/thumb-app.js"></script>
   </body>
 </html>
