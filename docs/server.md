@@ -28,6 +28,11 @@
 
 Стрим, async `fs.stat`, `Cache-Control: public, max-age=3600`, Range.
 
+### `DELETE /api/video?p=<relPath>`
+
+Удаляет файл под `VIDEO_ROOT` (только известные видео-расширения). Том с
+медиа должен быть доступен на запись (`:ro` в Docker блокирует удаление).
+
 ### `GET /api/thumbnail?p=<relPath>`
 
 JPEG через системный `ffmpeg`. Дисковый кэш (SHA1 path+mtime+size).

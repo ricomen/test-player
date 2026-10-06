@@ -1,4 +1,4 @@
-import { getVideos } from './videos-api.js';
+import { deleteVideo, getVideos } from './videos-api.js';
 
 (function () {
   const MIME_PROBE = document.createElement('video');
@@ -40,6 +40,17 @@ import { getVideos } from './videos-api.js';
     return level !== 'probably' && level !== 'maybe';
   }
 
+  function shuffleArray(items) {
+    const a = items.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const tmp = a[i];
+      a[i] = a[j];
+      a[j] = tmp;
+    }
+    return a;
+  }
+
   function sourceForVideoJs(item, p) {
     const src = streamUrl(p);
     const mime = item && typeof item.mime === 'string' ? item.mime : '';
@@ -56,11 +67,47 @@ import { getVideos } from './videos-api.js';
   function init() {
     const gridEl = document.getElementById('videoGrid');
     const cellTpl = document.getElementById('video-cell-tpl');
+    const shuffleBtn = document.getElementById('shuffleBtn');
+    const deleteModeBtn = document.getElementById('deleteModeBtn');
+    const deleteModeHint = document.getElementById('deleteModeHint');
     if (!gridEl || !cellTpl) return;
 
     /** @type {{ cell: Element, item: object, path: string, mode: 'native'|'vjs', video: HTMLVideoElement, player: object|null, active: boolean, portrait: boolean|null }[]} */
     let cells = [];
     let observer = null;
+    let deleteMode = false;
+
+    function setDeleteMode(on) {
+      deleteMode = Boolean(on);
+      gridEl.classList.toggle('video-grid--delete-mode', deleteMode);
+      if (deleteModeBtn) {
+        deleteModeBtn.setAttribute('aria-pressed', deleteMode ? 'true' : 'false');
+        deleteModeBtn.classList.toggle('btn--toggle-on', deleteMode);
+      }
+      if (deleteModeHint) {
+        deleteModeHint.hidden = !deleteMode;
+      }
+    }
+
+    if (shuffleBtn) {
+      shuffleBtn.addEventListener('click', async () => {
+        shuffleBtn.disabled = true;
+        try {
+          const items = await getVideos();
+          renderGrid(shuffleArray(items));
+        } catch (e) {
+          console.error(e);
+        } finally {
+          shuffleBtn.disabled = false;
+        }
+      });
+    }
+
+    if (deleteModeBtn) {
+      deleteModeBtn.addEventListener('click', () => {
+        setDeleteMode(!deleteMode);
+      });
+    }
 
     function applyOrientation(entry, width, height) {
       if (!width || !height) return;
@@ -185,14 +232,20 @@ import { getVideos } from './videos-api.js';
       ensureVideoEl(entry);
     }
 
+    function mediaRoot(entry) {
+      return entry.cell.querySelector('.video-cell__media');
+    }
+
     function ensureVideoEl(entry) {
+      const media = mediaRoot(entry);
+      if (!media) return;
       // videojs.dispose() перестраивает DOM — проще собрать чистый <video>.
-      entry.cell.innerHTML = '';
+      media.innerHTML = '';
       const v = document.createElement('video');
       v.className = 'video-js vjs-default-skin video-cell__player';
       v.setAttribute('playsinline', '');
       v.preload = 'none';
-      entry.cell.appendChild(v);
+      media.appendChild(v);
       entry.video = v;
       entry.player = null;
       entry.active = false;
@@ -201,15 +254,52 @@ import { getVideos } from './videos-api.js';
       }
     }
 
+    function showGridEmpty() {
+      const li = document.createElement('li');
+      li.className = 'video-grid__empty';
+      li.textContent = 'Нет видеофайлов в каталоге.';
+      gridEl.appendChild(li);
+    }
+
+    function removeCellEntry(entry) {
+      if (observer) {
+        observer.unobserve(entry.cell);
+      }
+      disposeCell(entry);
+      entry.cell.remove();
+      cells = cells.filter((c) => c !== entry);
+      if (cells.length === 0) {
+        showGridEmpty();
+      }
+    }
+
+    async function onDeleteClick(entry, btn) {
+      const name =
+        (entry.item && entry.item.name) || entry.path || 'этот файл';
+      const ok = window.confirm(
+        `Удалить «${name}» с диска?\n\nОтменить будет нельзя.`
+      );
+      if (!ok) return;
+
+      btn.disabled = true;
+      try {
+        await deleteVideo(entry.path);
+        removeCellEntry(entry);
+      } catch (e) {
+        console.error(e);
+        window.alert(
+          'Не удалось удалить: ' + (e && e.message ? e.message : e)
+        );
+        btn.disabled = false;
+      }
+    }
+
     function renderGrid(items) {
       disposeAll();
       gridEl.innerHTML = '';
 
       if (items.length === 0) {
-        const li = document.createElement('li');
-        li.className = 'video-grid__empty';
-        li.textContent = 'Нет видеофайлов в каталоге.';
-        gridEl.appendChild(li);
+        showGridEmpty();
         return;
       }
 
@@ -245,6 +335,7 @@ import { getVideos } from './videos-api.js';
           return;
         }
         const v = cell.querySelector('.video-cell__player');
+        const deleteBtn = cell.querySelector('.video-cell__delete');
         if (!v) {
           console.error('test-player: в .video-cell нет .video-cell__player');
           return;
@@ -263,23 +354,34 @@ import { getVideos } from './videos-api.js';
           portrait: null,
         };
         cells.push(entry);
+        if (deleteBtn) {
+          deleteBtn.addEventListener('click', (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            onDeleteClick(entry, deleteBtn);
+          });
+        }
         gridEl.appendChild(fragment);
         observer.observe(cell);
       });
     }
 
-    getVideos()
-      .then((items) => {
+    async function loadGrid() {
+      try {
+        const items = await getVideos();
         renderGrid(items);
-      })
-      .catch((e) => {
+      } catch (e) {
         console.error(e);
+        disposeAll();
         gridEl.innerHTML = '';
         const li = document.createElement('li');
         li.className = 'video-grid__empty';
         li.textContent = 'Не удалось загрузить список.';
         gridEl.appendChild(li);
-      });
+      }
+    }
+
+    loadGrid();
   }
 
   if (document.readyState === 'loading') {

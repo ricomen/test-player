@@ -49,8 +49,44 @@ async function main() {
     return;
   }
 
-  await fillVideoSelect(selectEl, statusEl);
-  thumbBtn.disabled = selectEl.disabled || !selectEl.value;
+  async function refreshSelect() {
+    await fillVideoSelect(selectEl, statusEl);
+    thumbBtn.disabled = selectEl.disabled || !selectEl.value;
+  }
+
+  function removePathFromSelect(relPath) {
+    const opts = [...selectEl.options];
+    const match = opts.find((o) => o.value === relPath);
+    if (!match) return;
+    match.remove();
+    if (selectEl.value === relPath) {
+      selectEl.value = selectEl.options[0]?.value || '';
+      previewWrap.hidden = true;
+      if (previewObjectUrl) {
+        URL.revokeObjectURL(previewObjectUrl);
+        previewObjectUrl = null;
+      }
+      previewImg.removeAttribute('src');
+    }
+    if (selectEl.options.length === 0) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = 'Нет видео';
+      selectEl.appendChild(opt);
+      selectEl.disabled = true;
+    }
+    thumbBtn.disabled = selectEl.disabled || !selectEl.value;
+  }
+
+  await refreshSelect();
+  window.addEventListener('videos-changed', (ev) => {
+    const d = ev.detail;
+    if (d && d.action === 'delete' && typeof d.path === 'string') {
+      removePathFromSelect(d.path);
+      return;
+    }
+    refreshSelect();
+  });
 
   selectEl.addEventListener('change', () => {
     thumbBtn.disabled = !selectEl.value;

@@ -4,7 +4,7 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./media:/videos:ro
+      - ./media:/videos
     environment:
       VIDEO_ROOT: /videos
       PORT: 8080

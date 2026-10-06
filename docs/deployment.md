@@ -20,5 +20,6 @@ docker compose up --build
 # http://localhost:8080
 ```
 
-`./media` → `/videos:ro`. Кэш превью в `/tmp/test-player-thumbs` внутри
+`./media` → `/videos` (нужен запись для удаления из UI). Кэш превью в
+`/tmp/test-player-thumbs` внутри
 контейнера.

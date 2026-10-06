@@ -25,14 +25,19 @@
 
 ```css
 .video-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  grid-auto-rows: 220px;
-  grid-auto-flow: dense;
+  columns: 17.5rem;
+  column-gap: 0.75rem;
+}
+
+.video-cell {
+  display: inline-block;
+  width: 100%;
+  break-inside: avoid;
+  aspect-ratio: 16 / 9;
 }
 
 .video-cell--portrait {
-  grid-row: span 2;
+  aspect-ratio: 9 / 16;
 }
 
 .video-cell .video-js,
@@ -48,11 +53,10 @@
 }
 ```
 
-- `auto-fill + minmax(260px, 1fr)` — сетка автоматически подстраивается под
-  ширину контейнера.
-- `grid-auto-rows: 220px` — высота одной строки; портрет занимает две
-  (`.video-cell--portrait` → `grid-row: span 2`) после `loadedmetadata`.
-- `grid-auto-flow: dense` заполняет дыры после высоких ячеек.
+- `columns: 17.5rem` — столько колонок, сколько влезает по ширине; карточки
+  текут сверху вниз по колонкам без фиксированных «рядов» и дыр от grid.
+- Высота ячейки — `aspect-ratio` (16/9; портрет 9/16 после `loadedmetadata`).
+- `break-inside: avoid` — карточка не рвётся между колонками.
 - `object-fit: contain` сохраняет соотношение сторон без обрезки.
 
 ## Превью кадра

@@ -13,6 +13,22 @@
   <body>
     <main class="layout">
       <section class="grid-section" aria-label="Сетка видео">
+        <div class="grid-toolbar">
+          <button type="button" class="btn" id="shuffleBtn">
+            Случайный порядок
+          </button>
+          <button
+            type="button"
+            class="btn btn--toggle"
+            id="deleteModeBtn"
+            aria-pressed="false"
+          >
+            Режим удаления
+          </button>
+          <p class="grid-toolbar__hint" id="deleteModeHint" hidden>
+            Наведите указку на ролик и нажмите ×. Файл удаляется с диска.
+          </p>
+        </div>
         <ul class="video-grid" id="videoGrid"></ul>
       </section>
 
@@ -43,11 +59,21 @@
 
     <template id="video-cell-tpl">
       <li class="video-cell">
-        <video
-          class="video-js vjs-default-skin video-cell__player"
-          playsinline
-          preload="none"
-        ></video>
+        <div class="video-cell__media">
+          <video
+            class="video-js vjs-default-skin video-cell__player"
+            playsinline
+            preload="none"
+          ></video>
+        </div>
+        <button
+          type="button"
+          class="video-cell__delete"
+          aria-label="Удалить файл с диска"
+          title="Удалить"
+        >
+          ×
+        </button>
       </li>
     </template>
 

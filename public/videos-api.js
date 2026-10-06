@@ -2,6 +2,32 @@
 
 let promise = null;
 
+export function invalidateVideosList() {
+  promise = null;
+}
+
+export function deleteVideo(relPath) {
+  return fetch('/api/video?p=' + encodeURIComponent(relPath), {
+    method: 'DELETE',
+  }).then(async (res) => {
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const msg =
+        body && typeof body.error === 'string'
+          ? body.error
+          : `HTTP ${res.status}`;
+      throw new Error(msg);
+    }
+    invalidateVideosList();
+    window.dispatchEvent(
+      new CustomEvent('videos-changed', {
+        detail: { action: 'delete', path: relPath },
+      })
+    );
+    return body;
+  });
+}
+
 export function getVideos() {
   if (!promise) {
     promise = fetch('/api/videos')

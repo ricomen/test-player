@@ -117,6 +117,10 @@ async function getVideosCached() {
   return list;
 }
 
+function invalidateVideosCache() {
+  videosCache = { at: 0, mtimeMs: null, list: null };
+}
+
 let ffmpegAvailable = null;
 
 async function ensureFfmpeg() {
@@ -215,6 +219,44 @@ app.get('/api/video', async (req, res) => {
       res.status(500).end();
     }
   });
+});
+
+app.delete('/api/video', async (req, res) => {
+  const full = safeFileUnderRoot(VIDEO_ROOT, req.query.p);
+  if (!full) {
+    return res.status(404).json({ error: 'Файл не найден' });
+  }
+
+  let st;
+  try {
+    st = await fs.stat(full);
+  } catch {
+    return res.status(404).json({ error: 'Файл не найден' });
+  }
+  if (!st.isFile()) {
+    return res.status(404).json({ error: 'Файл не найден' });
+  }
+
+  const ext = path.extname(full).toLowerCase();
+  if (!VIDEO_EXT.has(ext)) {
+    return res.status(400).json({ error: 'Недопустимый тип файла' });
+  }
+
+  try {
+    await fs.unlink(full);
+    invalidateVideosCache();
+    res.json({ ok: true, path: req.query.p });
+  } catch (err) {
+    console.error(err);
+    const code = err && err.code === 'EACCES' ? 403 : 500;
+    res.status(code).json({
+      error:
+        code === 403
+          ? 'Нет прав на удаление (проверьте том :ro)'
+          : 'Не удалось удалить файл',
+      detail: err && err.message ? err.message : String(err),
+    });
+  }
 });
 
 app.get('/api/thumbnail', async (req, res) => {
