@@ -65,6 +65,7 @@ body {
 
 .grid-section {
   grid-column: 1 / -1;
+  padding-top: 5.5rem;
 }
 
 .grid-toolbar {
@@ -225,6 +226,37 @@ body.spotlight-open::before {
 .video-cell.is-spotlight-active {
   outline: 2px solid var(--accent-dim);
   outline-offset: -2px;
+}
+
+.video-grid-viewport {
+  width: 100%;
+}
+
+body:has(.video-grid-viewport--paged) {
+  overflow: hidden;
+}
+
+.video-grid-viewport--paged {
+  height: calc(100dvh - 5.5rem);
+  overflow-y: auto;
+  overflow-x: hidden;
+  scroll-snap-type: y mandatory;
+  scroll-behavior: smooth;
+  overscroll-behavior-y: contain;
+}
+
+.video-grid-page {
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+  min-height: calc(100dvh - 5.5rem);
+  box-sizing: border-box;
+}
+
+.video-grid-page .video-grid {
+  columns: unset;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(17.5rem, 1fr));
+  gap: 0;
 }
 
 .video-grid {

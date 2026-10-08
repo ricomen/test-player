@@ -25,6 +25,8 @@ import { deleteVideo, getVideos } from './videos-api.js';
 
   const STORAGE_TILE_MODE = 'test-player-tileMode';
   const STORAGE_FRAME_STEP = 'test-player-frameStep';
+  const STORAGE_PAGE_SCROLL = 'test-player-pageScroll';
+  const GRID_COL_MIN_PX = 280;
 
   function fileExtLower(p) {
     if (typeof p !== 'string') return '';
@@ -118,7 +120,7 @@ import { deleteVideo, getVideos } from './videos-api.js';
   }
 
   function init() {
-    const gridEl = document.getElementById('videoGrid');
+    const gridViewport = document.getElementById('videoGridViewport');
     const cellTpl = document.getElementById('video-cell-tpl');
     const shuffleBtn = document.getElementById('shuffleBtn');
     const deleteModeBtn = document.getElementById('deleteModeBtn');
@@ -129,7 +131,8 @@ import { deleteVideo, getVideos } from './videos-api.js';
     const tileModeSelect = document.getElementById('tileModeSelect');
     const frameStepSelect = document.getElementById('frameStepSelect');
     const frameStepWrap = document.getElementById('frameStepWrap');
-    if (!gridEl || !cellTpl) return;
+    const pageScrollSelect = document.getElementById('pageScrollSelect');
+    if (!gridViewport || !cellTpl) return;
 
     let tileMode =
       localStorage.getItem(STORAGE_TILE_MODE) === 'frames' ? 'frames' : 'video';
@@ -137,7 +140,9 @@ import { deleteVideo, getVideos } from './videos-api.js';
       5,
       parseInt(localStorage.getItem(STORAGE_FRAME_STEP) || '60', 10) || 60
     );
+    let pagedScroll = localStorage.getItem(STORAGE_PAGE_SCROLL) === 'paged';
     let lastGridItems = [];
+    let resizeRenderTimer = null;
 
     /** @type {{ cell: Element, item: object, path: string, mode: 'native'|'vjs', video: HTMLVideoElement, player: object|null, active: boolean, activeGridKind: 'video'|'frames'|null, portrait: boolean|null, posterUrl: string|null, frameTimer: number|null, frameTimeSec: number, durationSec: number|null, _deactivating: boolean, _inView: boolean }[]} */
     let cells = [];
@@ -215,7 +220,7 @@ import { deleteVideo, getVideos } from './videos-api.js';
 
     function setDeleteMode(on) {
       deleteMode = Boolean(on);
-      gridEl.classList.toggle('video-grid--delete-mode', deleteMode);
+      gridViewport.classList.toggle('video-grid--delete-mode', deleteMode);
       if (deleteModeBtn) {
         deleteModeBtn.setAttribute('aria-pressed', deleteMode ? 'true' : 'false');
         deleteModeBtn.classList.toggle('btn--toggle-on', deleteMode);
@@ -317,7 +322,37 @@ import { deleteVideo, getVideos } from './videos-api.js';
       if (frameStepWrap) {
         frameStepWrap.hidden = tileMode !== 'frames';
       }
-      gridEl.classList.toggle('video-grid--tile-frames', tileMode === 'frames');
+      gridViewport.classList.toggle(
+        'video-grid--tile-frames',
+        tileMode === 'frames'
+      );
+      gridViewport.classList.toggle(
+        'video-grid-viewport--paged',
+        pagedScroll
+      );
+      if (pageScrollSelect) {
+        pageScrollSelect.value = pagedScroll ? 'paged' : 'continuous';
+      }
+    }
+
+    function computeItemsPerPage() {
+      const toolbar = document.querySelector('.grid-toolbar');
+      const toolbarH = toolbar ? toolbar.getBoundingClientRect().height : 88;
+      const availH = Math.max(200, window.innerHeight - toolbarH);
+      const availW = window.innerWidth;
+      const cols = Math.max(1, Math.floor(availW / GRID_COL_MIN_PX));
+      const colWidth = availW / cols;
+      const cellH = colWidth * (9 / 16);
+      const rows = Math.max(1, Math.floor(availH / cellH));
+      return Math.max(1, cols * rows);
+    }
+
+    function chunkItems(items, size) {
+      const pages = [];
+      for (let i = 0; i < items.length; i += size) {
+        pages.push(items.slice(i, i + size));
+      }
+      return pages;
     }
 
     async function fetchDuration(entry) {
@@ -901,10 +936,16 @@ import { deleteVideo, getVideos } from './videos-api.js';
     }
 
     function showGridEmpty() {
+      const wrap = document.createElement('div');
+      wrap.className = pagedScroll ? 'video-grid-page' : 'video-grid-continuous';
+      const ul = document.createElement('ul');
+      ul.className = 'video-grid';
       const li = document.createElement('li');
       li.className = 'video-grid__empty';
       li.textContent = 'Нет видеофайлов в каталоге.';
-      gridEl.appendChild(li);
+      ul.appendChild(li);
+      wrap.appendChild(ul);
+      gridViewport.appendChild(wrap);
     }
 
     function removeCellEntry(entry) {
@@ -945,39 +986,7 @@ import { deleteVideo, getVideos } from './videos-api.js';
       }
     }
 
-    function renderGrid(items) {
-      lastGridItems = items;
-      disposeAll();
-      gridEl.innerHTML = '';
-      syncTileToolbar();
-
-      if (items.length === 0) {
-        showGridEmpty();
-        return;
-      }
-
-      observer = new IntersectionObserver(
-        (entries) => {
-          for (const io of entries) {
-            const entry = cells.find((c) => c.cell === io.target);
-            if (!entry) continue;
-            if (io.isIntersecting) {
-              entry._inView = true;
-              activateForGrid(entry);
-            } else {
-              entry._inView = false;
-              void deactivateCell(entry);
-            }
-          }
-        },
-        {
-          root: null,
-          rootMargin: '200px 0px',
-          threshold: 0.01,
-        }
-      );
-
-      items.forEach((item) => {
+    function appendCellToGrid(item, ul) {
         const p = itemPath(item);
         if (!p) return;
 
@@ -1072,9 +1081,59 @@ import { deleteVideo, getVideos } from './videos-api.js';
             true
           );
         }
-        gridEl.appendChild(fragment);
+        ul.appendChild(fragment);
         observer.observe(cell);
-      });
+    }
+
+    function renderGrid(items) {
+      lastGridItems = items;
+      disposeAll();
+      gridViewport.innerHTML = '';
+      syncTileToolbar();
+
+      if (items.length === 0) {
+        showGridEmpty();
+        return;
+      }
+
+      const pageChunks = pagedScroll
+        ? chunkItems(items, computeItemsPerPage())
+        : [items];
+
+      observer = new IntersectionObserver(
+        (entries) => {
+          for (const io of entries) {
+            const entry = cells.find((c) => c.cell === io.target);
+            if (!entry) continue;
+            if (io.isIntersecting) {
+              entry._inView = true;
+              activateForGrid(entry);
+            } else {
+              entry._inView = false;
+              void deactivateCell(entry);
+            }
+          }
+        },
+        {
+          root: pagedScroll ? gridViewport : null,
+          rootMargin: pagedScroll ? '0px' : '200px 0px',
+          threshold: 0.01,
+        }
+      );
+
+      for (const pageItems of pageChunks) {
+        const wrap = document.createElement('div');
+        wrap.className = pagedScroll
+          ? 'video-grid-page'
+          : 'video-grid-continuous';
+        const ul = document.createElement('ul');
+        ul.className = 'video-grid';
+        for (const item of pageItems) {
+          appendCellToGrid(item, ul);
+        }
+        wrap.appendChild(ul);
+        gridViewport.appendChild(wrap);
+      }
     }
 
     if (tileModeSelect) {
@@ -1102,6 +1161,31 @@ import { deleteVideo, getVideos } from './videos-api.js';
       });
     }
 
+    if (pageScrollSelect) {
+      pageScrollSelect.addEventListener('change', () => {
+        pagedScroll = pageScrollSelect.value === 'paged';
+        localStorage.setItem(
+          STORAGE_PAGE_SCROLL,
+          pagedScroll ? 'paged' : 'continuous'
+        );
+        syncTileToolbar();
+        if (lastGridItems.length) {
+          renderGrid(lastGridItems);
+        }
+      });
+    }
+
+    window.addEventListener('resize', () => {
+      if (!pagedScroll || !lastGridItems.length) return;
+      if (resizeRenderTimer) {
+        clearTimeout(resizeRenderTimer);
+      }
+      resizeRenderTimer = window.setTimeout(() => {
+        resizeRenderTimer = null;
+        renderGrid(lastGridItems);
+      }, 250);
+    });
+
     syncTileToolbar();
 
     async function loadGrid() {
@@ -1111,11 +1195,17 @@ import { deleteVideo, getVideos } from './videos-api.js';
       } catch (e) {
         console.error(e);
         disposeAll();
-        gridEl.innerHTML = '';
+        gridViewport.innerHTML = '';
+        const wrap = document.createElement('div');
+        wrap.className = 'video-grid-continuous';
+        const ul = document.createElement('ul');
+        ul.className = 'video-grid';
         const li = document.createElement('li');
         li.className = 'video-grid__empty';
         li.textContent = 'Не удалось загрузить список.';
-        gridEl.appendChild(li);
+        ul.appendChild(li);
+        wrap.appendChild(ul);
+        gridViewport.appendChild(wrap);
       }
     }
 

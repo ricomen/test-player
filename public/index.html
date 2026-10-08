@@ -32,6 +32,13 @@
               <option value="frames">Кадры</option>
             </select>
           </label>
+          <label class="grid-toolbar__label">
+            Прокрутка
+            <select id="pageScrollSelect" class="grid-toolbar__select">
+              <option value="continuous">Обычная</option>
+              <option value="paged">По страницам</option>
+            </select>
+          </label>
           <label class="grid-toolbar__label" id="frameStepWrap">
             Шаг
             <select id="frameStepSelect" class="grid-toolbar__select">
@@ -68,7 +75,7 @@
           </div>
           <div class="video-spotlight__media" id="spotlightMedia"></div>
         </div>
-        <ul class="video-grid" id="videoGrid"></ul>
+        <div class="video-grid-viewport" id="videoGridViewport"></div>
       </section>
 
       <!-- <section class="thumb-section" aria-label="Превью кадра">
