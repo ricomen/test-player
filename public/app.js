@@ -122,6 +122,73 @@ import { deleteVideo, getVideos } from './videos-api.js';
     let deleteMode = false;
     /** @type {typeof cells[0] | null} */
     let spotlightEntry = null;
+    let userPlaybackUnlocked = false;
+    const prefersTvPlayback =
+      window.matchMedia('(pointer: coarse)').matches ||
+      /Web0S|webOS|Tizen|SmartTV|BRAVIA|HbbTV/i.test(navigator.userAgent);
+
+    function clearNeedsGesture(entry) {
+      entry.cell.classList.remove('video-cell--needs-gesture');
+      entry.cell.removeAttribute('title');
+    }
+
+    function markNeedsGesture(entry, err) {
+      entry.cell.classList.add('video-cell--needs-gesture');
+      const name = err && err.name ? err.name : '';
+      entry.cell.setAttribute(
+        'title',
+        name === 'NotAllowedError'
+          ? 'Нажмите OK или клик для воспроизведения'
+          : 'Не удалось воспроизвести'
+      );
+      if (err) {
+        console.warn('test-player: play', entry.path, err);
+      }
+    }
+
+    function playVideoElement(entry, videoEl) {
+      if (!videoEl) return Promise.resolve();
+      return videoEl.play().catch((err) => {
+        markNeedsGesture(entry, err);
+        return Promise.reject(err);
+      });
+    }
+
+    function playEntry(entry) {
+      if (!entry) return Promise.resolve();
+      clearNeedsGesture(entry);
+      if (entry.player && !entry.player.isDisposed()) {
+        return entry.player.play().catch((err) => {
+          markNeedsGesture(entry, err);
+          return Promise.reject(err);
+        });
+      }
+      if (entry.video) {
+        return playVideoElement(entry, entry.video);
+      }
+      return Promise.resolve();
+    }
+
+    function entryEligibleForUnlockPlay(entry) {
+      if (entry._inView || entry === spotlightEntry) return true;
+      if (!prefersTvPlayback) return false;
+      const cell = entry.cell;
+      return (
+        cell === document.activeElement || cell.contains(document.activeElement)
+      );
+    }
+
+    function unlockUserPlayback() {
+      const first = !userPlaybackUnlocked;
+      userPlaybackUnlocked = true;
+      if (!first) return;
+      for (const entry of cells) {
+        clearNeedsGesture(entry);
+        if (!entryEligibleForUnlockPlay(entry)) continue;
+        if (!entry.active) activateCell(entry);
+        void playEntry(entry);
+      }
+    }
 
     function setDeleteMode(on) {
       deleteMode = Boolean(on);
@@ -154,6 +221,15 @@ import { deleteVideo, getVideos } from './videos-api.js';
         setDeleteMode(!deleteMode);
       });
     }
+
+    document.addEventListener('pointerdown', unlockUserPlayback, {
+      capture: true,
+      passive: true,
+    });
+    document.addEventListener('keydown', unlockUserPlayback, {
+      capture: true,
+      passive: true,
+    });
 
     function applyOrientation(entry, width, height) {
       if (!width || !height) return;
@@ -223,7 +299,7 @@ import { deleteVideo, getVideos } from './videos-api.js';
       if (!videoEl) return;
       const t = readResumeTime(entry);
       if (t <= 0) {
-        videoEl.play().catch(() => {});
+        void playVideoElement(entry, videoEl);
         return;
       }
 
@@ -236,13 +312,13 @@ import { deleteVideo, getVideos } from './videos-api.js';
         try {
           videoEl.currentTime = target;
         } catch (_) {
-          videoEl.play().catch(() => {});
+          void playVideoElement(entry, videoEl);
           return;
         }
         videoEl.addEventListener(
           'seeked',
           () => {
-            videoEl.play().catch(() => {});
+            void playVideoElement(entry, videoEl);
           },
           { once: true }
         );
@@ -386,6 +462,9 @@ import { deleteVideo, getVideos } from './videos-api.js';
       }
       setEntryMutedForGrid(entry, false);
       setSpotlightOpen(true);
+      userPlaybackUnlocked = true;
+      clearNeedsGesture(entry);
+      void playEntry(entry);
     }
 
     if (spotlightClose) {
@@ -467,11 +546,7 @@ import { deleteVideo, getVideos } from './videos-api.js';
         return;
       }
       if (entry.active) {
-        if (entry.player && !entry.player.isDisposed()) {
-          entry.player.play().catch(() => {});
-        } else if (entry.video) {
-          entry.video.play().catch(() => {});
-        }
+        void playEntry(entry);
         return;
       }
       if (entry.mode === 'native') {
@@ -645,6 +720,21 @@ import { deleteVideo, getVideos } from './videos-api.js';
           _inView: false,
         };
         cells.push(entry);
+        cell.setAttribute('tabindex', '0');
+        cell.addEventListener('focusin', () => {
+          if (deleteMode) return;
+          activateCell(entry);
+          if (prefersTvPlayback && userPlaybackUnlocked) {
+            void playEntry(entry);
+          }
+        });
+        cell.addEventListener('keydown', (ev) => {
+          if (deleteMode) return;
+          if (ev.key !== 'Enter' && ev.key !== ' ') return;
+          ev.preventDefault();
+          unlockUserPlayback();
+          void openSpotlight(entry);
+        });
         if (deleteBtn) {
           deleteBtn.addEventListener('click', (ev) => {
             ev.preventDefault();
@@ -662,6 +752,7 @@ import { deleteVideo, getVideos } from './videos-api.js';
               if (ev.target.closest('.vjs-control-bar')) return;
               ev.preventDefault();
               ev.stopPropagation();
+              unlockUserPlayback();
               void openSpotlight(entry);
             },
             true

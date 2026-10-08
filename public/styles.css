@@ -209,6 +209,26 @@ body.spotlight-open::before {
   page-break-inside: avoid;
 }
 
+.video-cell:focus-visible {
+  outline: 3px solid var(--accent, #6ea8fe);
+  outline-offset: 2px;
+}
+
+.video-cell--needs-gesture .video-cell__media::after {
+  content: '▶';
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(2rem, 8vw, 4rem);
+  color: rgba(255, 255, 255, 0.92);
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.85);
+  pointer-events: none;
+  background: rgba(0, 0, 0, 0.35);
+}
+
 .video-cell__media {
   position: absolute;
   inset: 0;
