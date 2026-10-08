@@ -86,6 +86,34 @@ body {
   max-width: 42ch;
 }
 
+.grid-toolbar__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+.grid-toolbar__select {
+  font: inherit;
+  color: inherit;
+  background: var(--surface, #1a1a1a);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  padding: 0.35rem 0.5rem;
+}
+
+.video-cell--frames .video-cell__player,
+.video-cell--frames .video-js {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.video-cell--frames .video-cell__poster {
+  z-index: 3;
+  opacity: 1;
+}
+
 .btn--toggle-on {
   background: rgba(242, 139, 130, 0.22);
   border-color: #e57373;

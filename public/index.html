@@ -25,6 +25,22 @@
           >
             Режим удаления
           </button>
+          <label class="grid-toolbar__label">
+            Плитки
+            <select id="tileModeSelect" class="grid-toolbar__select">
+              <option value="video">Видео</option>
+              <option value="frames">Кадры</option>
+            </select>
+          </label>
+          <label class="grid-toolbar__label" id="frameStepWrap">
+            Шаг
+            <select id="frameStepSelect" class="grid-toolbar__select">
+              <option value="30">30 с</option>
+              <option value="60">1 мин</option>
+              <option value="120">2 мин</option>
+              <option value="300">5 мин</option>
+            </select>
+          </label>
           <p class="grid-toolbar__hint" id="deleteModeHint" hidden>
             Наведите указку на ролик и нажмите ×. Файл удаляется с диска.
           </p>

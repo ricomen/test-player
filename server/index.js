@@ -134,21 +134,28 @@ async function ensureFfmpeg() {
   return ffmpegAvailable;
 }
 
-function thumbCacheKey(fullPath, mtimeMs, size) {
+function parseSeekSec(raw) {
+  if (raw == null || raw === '') return 0;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.min(Math.floor(n), 86400);
+}
+
+function thumbCacheKey(fullPath, mtimeMs, size, seekSec) {
   return crypto
     .createHash('sha1')
-    .update(`${fullPath}|${mtimeMs}|${size}`)
+    .update(`${fullPath}|${mtimeMs}|${size}|t=${seekSec}`)
     .digest('hex');
 }
 
-function runFfmpegThumb(inputPath, outputPath) {
+function runFfmpegThumb(inputPath, outputPath, seekSec = 0) {
   return new Promise((resolve, reject) => {
     const args = [
       '-hide_banner',
       '-loglevel',
       'error',
       '-ss',
-      '0',
+      String(seekSec),
       '-i',
       inputPath,
       '-frames:v',
@@ -170,6 +177,46 @@ function runFfmpegThumb(inputPath, outputPath) {
       else reject(new Error(stderr.trim() || `ffmpeg exit ${code}`));
     });
   });
+}
+
+/** @type {Map<string, number | null>} */
+const durationCache = new Map();
+
+function durationCacheId(fullPath, mtimeMs, size) {
+  return `${fullPath}|${mtimeMs}|${size}`;
+}
+
+async function probeDurationSec(fullPath, st) {
+  const id = durationCacheId(fullPath, st.mtimeMs, st.size);
+  if (durationCache.has(id)) {
+    return durationCache.get(id);
+  }
+  if (!(await ensureFfmpeg())) {
+    durationCache.set(id, null);
+    return null;
+  }
+  try {
+    const { stdout } = await execFileAsync(
+      'ffprobe',
+      [
+        '-v',
+        'error',
+        '-show_entries',
+        'format=duration',
+        '-of',
+        'default=noprint_wrappers=1:nokey=1',
+        fullPath,
+      ],
+      { timeout: 120000, maxBuffer: 4096 }
+    );
+    const d = parseFloat(String(stdout).trim());
+    const val = Number.isFinite(d) && d > 0 ? d : null;
+    durationCache.set(id, val);
+    return val;
+  } catch {
+    durationCache.set(id, null);
+    return null;
+  }
 }
 
 const app = express();
@@ -282,9 +329,11 @@ app.get('/api/thumbnail', async (req, res) => {
     });
   }
 
+  const seekSec = parseSeekSec(req.query.t);
+
   try {
     await fs.mkdir(THUMB_CACHE, { recursive: true });
-    const key = thumbCacheKey(full, st.mtimeMs, st.size);
+    const key = thumbCacheKey(full, st.mtimeMs, st.size, seekSec);
     const cached = path.join(THUMB_CACHE, `${key}.jpg`);
 
     try {
@@ -292,7 +341,7 @@ app.get('/api/thumbnail', async (req, res) => {
     } catch {
       const tmp = path.join(THUMB_CACHE, `${key}.${process.pid}.tmp.jpg`);
       try {
-        await runFfmpegThumb(full, tmp);
+        await runFfmpegThumb(full, tmp, seekSec);
         await fs.rename(tmp, cached);
       } catch (err) {
         await fs.unlink(tmp).catch(() => {});
@@ -313,6 +362,38 @@ app.get('/api/thumbnail', async (req, res) => {
       error: 'Не удалось извлечь кадр',
       detail: err && err.message ? err.message : String(err),
     });
+  }
+});
+
+app.get('/api/duration', async (req, res) => {
+  const full = safeFileUnderRoot(VIDEO_ROOT, req.query.p);
+  if (!full) {
+    return res.status(404).json({ error: 'Файл не найден' });
+  }
+
+  let st;
+  try {
+    st = await fs.stat(full);
+  } catch {
+    return res.status(404).json({ error: 'Файл не найден' });
+  }
+  if (!st.isFile()) {
+    return res.status(404).json({ error: 'Файл не найден' });
+  }
+
+  if (!(await ensureFfmpeg())) {
+    return res.status(503).json({
+      error: 'ffmpeg не установлен на сервере',
+    });
+  }
+
+  try {
+    const duration = await probeDurationSec(full, st);
+    res.set('Cache-Control', 'private, max-age=3600');
+    res.json({ duration });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Не удалось определить длительность' });
   }
 });
 

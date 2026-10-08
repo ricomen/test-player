@@ -14,6 +14,18 @@ import { deleteVideo, getVideos } from './videos-api.js';
     return '/api/video?p=' + encodeURIComponent(relPath);
   }
 
+  function thumbUrl(relPath, seekSec = 0) {
+    let url = '/api/thumbnail?p=' + encodeURIComponent(relPath);
+    const t = Math.max(0, Math.floor(seekSec));
+    if (t > 0) {
+      url += '&t=' + encodeURIComponent(String(t));
+    }
+    return url;
+  }
+
+  const STORAGE_TILE_MODE = 'test-player-tileMode';
+  const STORAGE_FRAME_STEP = 'test-player-frameStep';
+
   function fileExtLower(p) {
     if (typeof p !== 'string') return '';
     const i = p.lastIndexOf('.');
@@ -114,9 +126,20 @@ import { deleteVideo, getVideos } from './videos-api.js';
     const spotlightEl = document.getElementById('videoSpotlight');
     const spotlightTitle = document.getElementById('spotlightTitle');
     const spotlightClose = document.getElementById('spotlightClose');
+    const tileModeSelect = document.getElementById('tileModeSelect');
+    const frameStepSelect = document.getElementById('frameStepSelect');
+    const frameStepWrap = document.getElementById('frameStepWrap');
     if (!gridEl || !cellTpl) return;
 
-    /** @type {{ cell: Element, item: object, path: string, mode: 'native'|'vjs', video: HTMLVideoElement, player: object|null, active: boolean, portrait: boolean|null, posterUrl: string|null, _deactivating: boolean, _inView: boolean }[]} */
+    let tileMode =
+      localStorage.getItem(STORAGE_TILE_MODE) === 'frames' ? 'frames' : 'video';
+    let frameStepSec = Math.max(
+      5,
+      parseInt(localStorage.getItem(STORAGE_FRAME_STEP) || '60', 10) || 60
+    );
+    let lastGridItems = [];
+
+    /** @type {{ cell: Element, item: object, path: string, mode: 'native'|'vjs', video: HTMLVideoElement, player: object|null, active: boolean, activeGridKind: 'video'|'frames'|null, portrait: boolean|null, posterUrl: string|null, frameTimer: number|null, frameTimeSec: number, durationSec: number|null, _deactivating: boolean, _inView: boolean }[]} */
     let cells = [];
     let observer = null;
     let deleteMode = false;
@@ -185,8 +208,8 @@ import { deleteVideo, getVideos } from './videos-api.js';
       for (const entry of cells) {
         clearNeedsGesture(entry);
         if (!entryEligibleForUnlockPlay(entry)) continue;
-        if (!entry.active) activateCell(entry);
-        void playEntry(entry);
+        if (!entry.active) activateForGrid(entry);
+        if (tileMode === 'video') void playEntry(entry);
       }
     }
 
@@ -251,6 +274,7 @@ import { deleteVideo, getVideos } from './videos-api.js';
     function disposeCell(entry) {
       if (!entry.active) return;
       entry.active = false;
+      entry.activeGridKind = null;
       try {
         if (entry.player && !entry.player.isDisposed()) {
           entry.player.dispose();
@@ -278,6 +302,117 @@ import { deleteVideo, getVideos } from './videos-api.js';
 
     function posterEl(entry) {
       return entry.cell.querySelector('.video-cell__poster');
+    }
+
+    function syncTileToolbar() {
+      if (tileModeSelect) {
+        tileModeSelect.value = tileMode;
+      }
+      if (frameStepSelect) {
+        const opt = [...frameStepSelect.options].find(
+          (o) => Number(o.value) === frameStepSec
+        );
+        frameStepSelect.value = opt ? opt.value : String(frameStepSec);
+      }
+      if (frameStepWrap) {
+        frameStepWrap.hidden = tileMode !== 'frames';
+      }
+      gridEl.classList.toggle('video-grid--tile-frames', tileMode === 'frames');
+    }
+
+    async function fetchDuration(entry) {
+      if (entry.durationSec != null) {
+        return entry.durationSec;
+      }
+      try {
+        const res = await fetch(
+          '/api/duration?p=' + encodeURIComponent(entry.path)
+        );
+        if (!res.ok) {
+          entry.durationSec = null;
+          return null;
+        }
+        const data = await res.json();
+        const d = data && data.duration;
+        entry.durationSec =
+          typeof d === 'number' && Number.isFinite(d) && d > 0 ? d : null;
+        return entry.durationSec;
+      } catch (err) {
+        console.warn('test-player: duration', entry.path, err);
+        entry.durationSec = null;
+        return null;
+      }
+    }
+
+    function showFrameAt(entry, sec) {
+      const img = posterEl(entry);
+      const v = entry.video;
+      if (!img) return;
+      if (v) {
+        v.hidden = true;
+      }
+      const t = Math.max(0, Math.floor(sec));
+      entry.frameTimeSec = t;
+      img.hidden = false;
+      img.alt = entry.path;
+      img.src = thumbUrl(entry.path, t);
+      img.onload = () => {
+        applyOrientation(entry, img.naturalWidth, img.naturalHeight);
+      };
+    }
+
+    function stopFrameSlideshow(entry) {
+      if (entry.frameTimer) {
+        clearInterval(entry.frameTimer);
+        entry.frameTimer = null;
+      }
+      if (entry.activeGridKind !== 'frames') return;
+      entry.activeGridKind = null;
+      entry.active = false;
+      entry.cell.classList.remove('video-cell--frames');
+      const img = posterEl(entry);
+      if (img) {
+        img.hidden = true;
+        img.removeAttribute('src');
+        img.removeAttribute('alt');
+      }
+      if (entry.video) {
+        entry.video.hidden = false;
+      }
+    }
+
+    async function activateFrameSlideshow(entry) {
+      if (spotlightEntry === entry) return;
+      if (entry.activeGridKind === 'frames') return;
+      if (entry.active) {
+        disposeCell(entry);
+      }
+      await fetchDuration(entry);
+      entry.active = true;
+      entry.activeGridKind = 'frames';
+      entry.cell.classList.add('video-cell--frames');
+      showFrameAt(entry, 0);
+      const step = frameStepSec;
+      entry.frameTimer = window.setInterval(() => {
+        let next = (entry.frameTimeSec || 0) + step;
+        const dur = entry.durationSec;
+        if (dur != null && next >= dur) {
+          next = 0;
+        } else if (dur == null && next > 3600) {
+          next = 0;
+        }
+        showFrameAt(entry, next);
+      }, step * 1000);
+    }
+
+    function activateForGrid(entry) {
+      if (spotlightEntry === entry) return;
+      if (tileMode === 'frames') {
+        void activateFrameSlideshow(entry);
+        return;
+      }
+      stopFrameSlideshow(entry);
+      activateCell(entry);
     }
 
     function readResumeTime(entry) {
@@ -409,8 +544,10 @@ import { deleteVideo, getVideos } from './videos-api.js';
     }
 
     async function ensureEntryActiveOnly(entry) {
-      if (entry.active) return;
-      activateCell(entry);
+      stopFrameSlideshow(entry);
+      if (!entry.active || entry.activeGridKind !== 'video') {
+        activateCell(entry);
+      }
       if (entry.player && !entry.player.isDisposed()) {
         await new Promise((resolve) => {
           entry.player.ready(resolve);
@@ -434,6 +571,11 @@ import { deleteVideo, getVideos } from './videos-api.js';
 
       if (!entry._inView) {
         void deactivateCell(entry);
+      } else if (tileMode === 'frames') {
+        activateForGrid(entry);
+      } else {
+        disposeCell(entry);
+        activateCell(entry);
       }
     }
 
@@ -480,6 +622,7 @@ import { deleteVideo, getVideos } from './videos-api.js';
     function disposeAll() {
       closeSpotlight();
       cells.forEach((entry) => {
+        stopFrameSlideshow(entry);
         disposeCell(entry);
         revokePosterUrl(entry);
       });
@@ -504,6 +647,7 @@ import { deleteVideo, getVideos } from './videos-api.js';
       bindRevealOnPlay(entry, v);
       playFromResumeTime(entry, v);
       entry.active = true;
+      entry.activeGridKind = 'video';
     }
 
     function activateVideoJs(entry) {
@@ -539,6 +683,7 @@ import { deleteVideo, getVideos } from './videos-api.js';
         playFromResumeTime(entry, tech);
       });
       entry.active = true;
+      entry.activeGridKind = 'video';
     }
 
     function activateCell(entry) {
@@ -558,6 +703,11 @@ import { deleteVideo, getVideos } from './videos-api.js';
 
     async function deactivateCell(entry) {
       if (spotlightEntry === entry) return;
+      if (entry.activeGridKind === 'frames') {
+        if (entry._inView) return;
+        stopFrameSlideshow(entry);
+        return;
+      }
       if (!entry.active || entry._deactivating) return;
       entry._deactivating = true;
       const videoEl = entry.video;
@@ -606,6 +756,7 @@ import { deleteVideo, getVideos } from './videos-api.js';
       entry.video = v;
       entry.player = null;
       entry.active = false;
+      entry.activeGridKind = null;
       if (entry.portrait) {
         entry.cell.classList.add('video-cell--portrait');
       }
@@ -625,6 +776,7 @@ import { deleteVideo, getVideos } from './videos-api.js';
       if (observer) {
         observer.unobserve(entry.cell);
       }
+      stopFrameSlideshow(entry);
       disposeCell(entry);
       revokePosterUrl(entry);
       entry.cell.remove();
@@ -656,8 +808,10 @@ import { deleteVideo, getVideos } from './videos-api.js';
     }
 
     function renderGrid(items) {
+      lastGridItems = items;
       disposeAll();
       gridEl.innerHTML = '';
+      syncTileToolbar();
 
       if (items.length === 0) {
         showGridEmpty();
@@ -671,7 +825,7 @@ import { deleteVideo, getVideos } from './videos-api.js';
             if (!entry) continue;
             if (io.isIntersecting) {
               entry._inView = true;
-              activateCell(entry);
+              activateForGrid(entry);
             } else {
               entry._inView = false;
               void deactivateCell(entry);
@@ -714,8 +868,12 @@ import { deleteVideo, getVideos } from './videos-api.js';
           video: v,
           player: null,
           active: false,
+          activeGridKind: null,
           portrait: null,
           posterUrl: null,
+          frameTimer: null,
+          frameTimeSec: 0,
+          durationSec: null,
           _deactivating: false,
           _inView: false,
         };
@@ -723,8 +881,12 @@ import { deleteVideo, getVideos } from './videos-api.js';
         cell.setAttribute('tabindex', '0');
         cell.addEventListener('focusin', () => {
           if (deleteMode) return;
-          activateCell(entry);
-          if (prefersTvPlayback && userPlaybackUnlocked) {
+          activateForGrid(entry);
+          if (
+            tileMode === 'video' &&
+            prefersTvPlayback &&
+            userPlaybackUnlocked
+          ) {
             void playEntry(entry);
           }
         });
@@ -762,6 +924,33 @@ import { deleteVideo, getVideos } from './videos-api.js';
         observer.observe(cell);
       });
     }
+
+    if (tileModeSelect) {
+      tileModeSelect.addEventListener('change', () => {
+        tileMode =
+          tileModeSelect.value === 'frames' ? 'frames' : 'video';
+        localStorage.setItem(STORAGE_TILE_MODE, tileMode);
+        syncTileToolbar();
+        if (lastGridItems.length) {
+          renderGrid(lastGridItems);
+        }
+      });
+    }
+
+    if (frameStepSelect) {
+      frameStepSelect.addEventListener('change', () => {
+        frameStepSec = Math.max(
+          5,
+          parseInt(frameStepSelect.value, 10) || 60
+        );
+        localStorage.setItem(STORAGE_FRAME_STEP, String(frameStepSec));
+        if (tileMode === 'frames' && lastGridItems.length) {
+          renderGrid(lastGridItems);
+        }
+      });
+    }
+
+    syncTileToolbar();
 
     async function loadGrid() {
       try {
