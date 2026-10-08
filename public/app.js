@@ -381,17 +381,16 @@ import { deleteVideo, getVideos } from './videos-api.js';
       }
     }
 
-    async function activateFrameSlideshow(entry) {
-      if (spotlightEntry === entry) return;
-      if (entry.activeGridKind === 'frames') return;
-      if (entry.active) {
-        disposeCell(entry);
+    function pauseSlideshowTimer(entry) {
+      if (entry.frameTimer) {
+        clearInterval(entry.frameTimer);
+        entry.frameTimer = null;
       }
-      await fetchDuration(entry);
-      entry.active = true;
-      entry.activeGridKind = 'frames';
-      entry.cell.classList.add('video-cell--frames');
-      showFrameAt(entry, 0);
+    }
+
+    function resumeSlideshowTimer(entry) {
+      if (tileMode !== 'frames' || entry.activeGridKind !== 'frames') return;
+      if (entry.frameTimer || !entry._inView) return;
       const step = frameStepSec;
       entry.frameTimer = window.setInterval(() => {
         let next = (entry.frameTimeSec || 0) + step;
@@ -403,6 +402,145 @@ import { deleteVideo, getVideos } from './videos-api.js';
         }
         showFrameAt(entry, next);
       }, step * 1000);
+    }
+
+    async function activateFrameSlideshow(entry) {
+      if (spotlightEntry === entry) return;
+      if (entry.activeGridKind === 'frames') return;
+      if (entry.active) {
+        disposeCell(entry);
+      }
+      await fetchDuration(entry);
+      entry.active = true;
+      entry.activeGridKind = 'frames';
+      entry.cell.classList.add('video-cell--frames');
+      showFrameAt(entry, 0);
+      resumeSlideshowTimer(entry);
+    }
+
+    function beginTileScrub(entry) {
+      if (entry._scrubbing) return;
+      entry._scrubbing = true;
+      entry.cell.classList.add('video-cell--scrubbing');
+      pauseSlideshowTimer(entry);
+      if (tileMode === 'video' && entry.active) {
+        if (entry.player && !entry.player.isDisposed()) {
+          entry.player.pause();
+        } else if (entry.video) {
+          entry.video.pause();
+        }
+      }
+    }
+
+    function endTileScrub(entry) {
+      if (!entry._scrubbing) return;
+      entry._scrubbing = false;
+      entry.cell.classList.remove('video-cell--scrubbing');
+      entry.cell.style.removeProperty('--scrub-ratio');
+      if (tileMode === 'frames') {
+        resumeSlideshowTimer(entry);
+        return;
+      }
+      if (tileMode === 'video' && entry._inView) {
+        if (!entry.active) {
+          const imgIdle = posterEl(entry);
+          if (imgIdle) {
+            imgIdle.hidden = true;
+            imgIdle.removeAttribute('src');
+          }
+          entry.cell.classList.remove('video-cell--frames');
+          entry.cell.style.removeProperty('--scrub-ratio');
+          return;
+        }
+        const img = posterEl(entry);
+        if (img) {
+          img.hidden = true;
+          img.removeAttribute('src');
+        }
+        entry.cell.classList.remove('video-cell--frames');
+        if (entry.video) {
+          entry.video.hidden = false;
+        }
+        entry.cell.style.removeProperty('--scrub-ratio');
+        void playEntry(entry);
+      }
+    }
+
+    async function updateScrubFrame(entry, media, clientX) {
+      let dur = entry.durationSec;
+      if (dur == null) {
+        dur = await fetchDuration(entry);
+      }
+      if (
+        dur == null &&
+        entry.video &&
+        Number.isFinite(entry.video.duration) &&
+        entry.video.duration > 0
+      ) {
+        dur = entry.video.duration;
+      }
+      if (dur == null) {
+        dur = 3600;
+      }
+      const rect = media.getBoundingClientRect();
+      if (rect.width <= 0) return;
+      const ratio = Math.min(
+        1,
+        Math.max(0, (clientX - rect.left) / rect.width)
+      );
+      const now = Date.now();
+      if (now - (entry._lastScrubAt || 0) < 120) {
+        return;
+      }
+      entry._lastScrubAt = now;
+      const t = Math.floor(ratio * dur);
+      entry.cell.classList.add('video-cell--frames');
+      showFrameAt(entry, t);
+      entry.cell.style.setProperty('--scrub-ratio', String(ratio));
+    }
+
+    function bindTileScrub(entry, media) {
+      entry._scrubDownX = 0;
+      entry._scrubDownY = 0;
+      entry._scrubDrag = false;
+      entry._suppressSpotlightClick = false;
+
+      media.addEventListener('pointerdown', (ev) => {
+        if (deleteMode) return;
+        entry._scrubDownX = ev.clientX;
+        entry._scrubDownY = ev.clientY;
+        entry._scrubDrag = false;
+      });
+
+      media.addEventListener('pointermove', (ev) => {
+        if (deleteMode || spotlightEntry === entry || !entry._inView) return;
+        const hoverScrub = ev.pointerType === 'mouse';
+        if (!hoverScrub && ev.buttons === 0) return;
+        if (!hoverScrub) {
+          const dx = Math.abs(ev.clientX - entry._scrubDownX);
+          const dy = Math.abs(ev.clientY - entry._scrubDownY);
+          if (dx > 5 || dy > 5) {
+            entry._scrubDrag = true;
+          }
+        }
+        beginTileScrub(entry);
+        void updateScrubFrame(entry, media, ev.clientX);
+      });
+
+      media.addEventListener('pointerleave', () => {
+        endTileScrub(entry);
+      });
+
+      media.addEventListener('pointerup', () => {
+        if (entry._scrubDrag) {
+          entry._suppressSpotlightClick = true;
+        }
+        endTileScrub(entry);
+      });
+
+      media.addEventListener('pointercancel', () => {
+        endTileScrub(entry);
+      });
     }
 
     function activateForGrid(entry) {
@@ -876,6 +1014,12 @@ import { deleteVideo, getVideos } from './videos-api.js';
           durationSec: null,
           _deactivating: false,
           _inView: false,
+          _scrubbing: false,
+          _lastScrubAt: 0,
+          _scrubDownX: 0,
+          _scrubDownY: 0,
+          _scrubDrag: false,
+          _suppressSpotlightClick: false,
         };
         cells.push(entry);
         cell.setAttribute('tabindex', '0');
@@ -906,12 +1050,20 @@ import { deleteVideo, getVideos } from './videos-api.js';
         }
         const media = cell.querySelector('.video-cell__media');
         if (media) {
+          bindTileScrub(entry, media);
           media.addEventListener(
             'click',
             (ev) => {
               if (deleteMode) return;
               if (ev.target.closest('.video-cell__delete')) return;
               if (ev.target.closest('.vjs-control-bar')) return;
+              if (entry._suppressSpotlightClick) {
+                entry._suppressSpotlightClick = false;
+                entry._scrubDrag = false;
+                ev.preventDefault();
+                ev.stopPropagation();
+                return;
+              }
               ev.preventDefault();
               ev.stopPropagation();
               unlockUserPlayback();

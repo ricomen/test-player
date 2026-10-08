@@ -114,6 +114,22 @@ body {
   opacity: 1;
 }
 
+.video-cell--scrubbing .video-cell__media {
+  cursor: ew-resize;
+}
+
+.video-cell--scrubbing .video-cell__media::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  z-index: 6;
+  height: 3px;
+  width: calc(var(--scrub-ratio, 0) * 100%);
+  background: var(--accent, #6ea8fe);
+  pointer-events: none;
+}
+
 .btn--toggle-on {
   background: rgba(242, 139, 130, 0.22);
   border-color: #e57373;
